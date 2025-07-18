@@ -3,33 +3,28 @@
     <h1>AI剧本杀生成器</h1>
     
     <div class="input-group">
-      <input v-model="theme" placeholder="输入题材（如：赛博朋克）">
-      <textarea v-model="characters" placeholder="输入角色，用/分隔（如：黑客/警察/AI/商人）"></textarea>
+      <input v-model="theme" placeholder="输入题材">
+      <textarea v-model="characters" placeholder="输入角色，用/分隔"></textarea>
       <button @click="generate" :disabled="loading">
         {{ loading ? '生成中...' : '一键生成' }}
       </button>
     </div>
 
-    <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="error" class="error">
+      {{ error }}
+      <button v-if="result?.imageUrl" @click="openImageDirectly">直接查看封面</button>
+    </div>
     
     <div v-if="result" class="result">
-      <div class="meta">生成耗时: {{ result.time }}</div>
-      
-      <div v-if="result.imageUrl" class="image-preview">
-        <h3>剧本封面</h3>
-        <img :src="result.imageUrl" alt="剧本封面" @error="handleImageError">
-        <p v-if="imageError" class="error">图片加载失败</p>
-      </div>
-      
       <div class="script">
-        <h2>剧本内容</h2>
+        <h2>{{ theme }}剧本</h2>
         <pre>{{ result.script }}</pre>
       </div>
       
       <div class="actions">
-        <button @click="downloadScript">下载剧本</button>
-        <button @click="downloadImage" v-if="result.imageUrl">下载封面</button>
-        <button @click="share">分享结果</button>
+        <button @click="copyScript">复制剧本</button>
+        <button v-if="result.imageUrl" @click="downloadImage">下载封面</button>
+        <button v-else @click="retryGenerate">重试生成封面</button>
       </div>
     </div>
   </div>
@@ -40,284 +35,127 @@ export default {
   data() {
     return {
       theme: '校园恋爱',
-      characters: '学霸/学渣/校花/体育生/班主任',
+      characters: '学霸/学渣/校花',
       loading: false,
       error: null,
-      result: null,
-      imageError: false
+      result: null
     }
   },
   methods: {
     async generate() {
       this.loading = true
       this.error = null
-      this.result = null
-      this.imageError = false
       
       try {
-        const response = await fetch('https://liaorunqing.pythonanywhere.com/generate', {
+        // 添加超时控制
+        const controller = new AbortController()
+        setTimeout(() => controller.abort(), 30000)  // 30秒超时
+        
+        const res = await fetch('https://liaorunqing.pythonanywhere.com/generate', {
           method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json; charset=utf-8',
-            'X-Requested-With': 'XMLHttpRequest'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             theme: this.theme,
             characters: this.characters
-          })
+          }),
+          signal: controller.signal
         })
         
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => null);
-          throw new Error(errorData?.error || `请求失败: ${response.status}`);
-        }
+        if (!res.ok) throw new Error('服务器响应异常')
         
-        const data = await response.json()
+        const data = await res.json()
+        if (!data.script) throw new Error('剧本生成失败')
+        
         this.result = data
       } catch (e) {
-        this.error = `错误: ${e.message}`
-        console.error('生成失败:', e)
+        this.error = e.message
+        this.result = { 
+          script: "请稍后手动刷新重试...",
+          imageUrl: "https://via.placeholder.com/512?text=点击重试生成封面"
+        }
       } finally {
         this.loading = false
       }
     },
-
-    handleImageError() {
-      this.imageError = true
-      console.error('图片加载失败')
+    
+    openImageDirectly() {
+      window.open(this.result.imageUrl, '_blank')
     },
-    downloadScript() {
-      const blob = new Blob([this.result.script], { type: 'text/plain' })
-      const link = document.createElement('a')
-      link.href = URL.createObjectURL(blob)
-      link.download = `${this.theme}剧本杀.txt`
-      link.click()
+    
+    copyScript() {
+      navigator.clipboard.writeText(this.result.script)
+        .then(() => alert('剧本已复制!'))
+        .catch(() => alert('请手动复制剧本内容'))
     },
-    downloadImage() {
-      if (this.result.imageUrl) {
-        // 添加时间戳确保下载最新图片
-        const timestamp = new Date().getTime();
-        const url = `${this.result.imageUrl}?t=${timestamp}`;
-        
-        fetch(url)
-          .then(response => response.blob())
-          .then(blob => {
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `${this.theme}剧本封面.jpg`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-          })
-          .catch(error => {
-            console.error('图片下载失败:', error);
-            alert('封面下载失败，请重试');
-          });
+    
+    async downloadImage() {
+      try {
+        const link = document.createElement('a')
+        link.href = this.result.imageUrl
+        link.download = `${this.theme}_封面.jpg`
+        link.click()
+      } catch (e) {
+        this.openImageDirectly()
       }
     },
-    share() {
-      if (navigator.share) {
-        navigator.share({
-          title: `AI生成的${this.theme}剧本杀`,
-          text: this.result.script.slice(0, 100) + '...',
-          url: window.location.href
-        }).catch(error => {
-          console.error('分享失败:', error)
-          alert('分享失败，请手动复制内容')
-        })
-      } else {
-        const shareText = `AI剧本杀生成器 - ${this.theme}\n\n${this.result.script.slice(0, 500)}...\n\n查看完整内容: ${window.location.href}`
-        navigator.clipboard.writeText(shareText)
-          .then(() => alert('内容已复制到剪贴板，请粘贴分享'))
-          .catch(() => alert('复制失败，请手动复制内容'))
-      }
+    
+    retryGenerate() {
+      this.generate()
     }
   }
 }
 </script>
 
 <style scoped>
-/* 保持之前的样式不变 */
+/* 精简样式保证快速加载 */
 .container {
   max-width: 800px;
   margin: 0 auto;
   padding: 20px;
-  font-family: 'Microsoft YaHei', sans-serif;
-  background-color: #f8f9fa;
-  border-radius: 10px;
-  box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
-}
-
-h1 {
-  text-align: center;
-  color: #2c3e50;
-  margin-bottom: 30px;
-  font-size: 2.5rem;
+  font-family: sans-serif;
 }
 
 .input-group {
   margin: 20px 0;
-  background: white;
-  padding: 25px;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
 }
 
-input, textarea {
+input, textarea, button {
   width: 100%;
-  padding: 15px;
-  margin-bottom: 20px;
+  padding: 10px;
+  margin-bottom: 10px;
   border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 16px;
-  transition: border-color 0.3;
-}
-
-input:focus, textarea:focus {
-  border-color: #4CAF50;
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
-}
-
-textarea {
-  height: 120px;
-  resize: vertical;
+  border-radius: 4px;
 }
 
 button {
-  padding: 14px 28px;
-  background-color: #4CAF50;
+  background: #4CAF50;
   color: white;
   border: none;
-  border-radius: 6px;
   cursor: pointer;
-  font-size: 17px;
-  font-weight: 600;
-  transition: all 0.3;
-  display: block;
-  width: 100%;
-  margin-top: 10px;
 }
 
 button:disabled {
-  background-color: #a5d6a7;
-  cursor: not-allowed;
-}
-
-button:hover:not(:disabled) {
-  background-color: #388e3c;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  background: #ccc;
 }
 
 .error {
-  color: #e53935;
-  padding: 15px;
-  margin: 20px 0;
-  border: 1px solid #ffcdd2;
-  border-radius: 6px;
-  background-color: #ffebee;
-  font-weight: 500;
+  color: red;
+  padding: 10px;
+  border: 1px solid red;
+  margin: 10px 0;
 }
 
 .result {
-  margin-top: 40px;
-  border-top: 2px solid #e0e0e0;
-  padding-top: 30px;
-}
-
-.meta {
-  color: #757575;
-  font-size: 15px;
-  margin-bottom: 20px;
-  text-align: center;
-}
-
-.image-preview {
-  margin-bottom: 30px;
-  text-align: center;
-  background: white;
-  padding: 20px;
-  border-radius: 10px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-}
-
-.image-preview img {
-  max-width: 100%;
-  max-height: 450px;
-  border-radius: 10px;
-  box-shadow: 0 6px 15px rgba(0,0,0,0.15);
-  border: 1px solid #eee;
-}
-
-.image-preview .error {
-  color: #e53935;
-  margin-top: 15px;
-  font-size: 16px;
-}
-
-.script {
-  background-color: white;
-  padding: 30px;
-  border-radius: 10px;
-  margin-bottom: 30px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-}
-
-.script h2 {
-  margin-top: 0;
-  color: #2c3e50;
-  border-bottom: 2px solid #4CAF50;
-  padding-bottom: 10px;
-}
-
-.script pre {
-  white-space: pre-wrap;
-  font-family: inherit;
-  line-height: 1.8;
-  font-size: 16px;
-  color: #37474f;
-  background: #fafafa;
-  padding: 20px;
-  border-radius: 8px;
-  overflow-x: auto;
+  margin-top: 20px;
 }
 
 .actions {
   display: flex;
-  gap: 15px;
-  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
 }
 
 .actions button {
   flex: 1;
-  min-width: 150px;
-  background-color: #2196F3;
-}
-
-.actions button:nth-child(2) {
-  background-color: #9C27B0;
-}
-
-.actions button:last-child {
-  background-color: #FF9800;
-}
-
-@media (max-width: 600px) {
-  .container {
-    padding: 15px;
-  }
-  
-  .input-group {
-    padding: 15px;
-  }
-  
-  .actions {
-    flex-direction: column;
-  }
-  
-  button {
-    padding: 12px;
-  }
 }
 </style>
