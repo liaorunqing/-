@@ -59,7 +59,7 @@ export default {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json; charset=utf-8',
-            'X-Requested-With': 'XMLHttpRequest'  // 添加安全头
+            'X-Requested-With': 'XMLHttpRequest'
           },
           body: JSON.stringify({
             theme: this.theme,
@@ -73,14 +73,6 @@ export default {
         }
         
         const data = await response.json()
-        
-        // 动态构建图片URL
-        if (data.image) {
-          // 使用当前域名构建图片URL
-          const baseUrl = window.location.origin;
-          data.imageUrl = `${baseUrl}/image/${data.image}?t=${Date.now()}`
-        }
-        
         this.result = data
       } catch (e) {
         this.error = `错误: ${e.message}`
@@ -103,10 +95,24 @@ export default {
     },
     downloadImage() {
       if (this.result.imageUrl) {
-        const link = document.createElement('a')
-        link.href = this.result.imageUrl
-        link.download = `${this.theme}剧本封面.jpg`
-        link.click()
+        // 添加时间戳确保下载最新图片
+        const timestamp = new Date().getTime();
+        const url = `${this.result.imageUrl}?t=${timestamp}`;
+        
+        fetch(url)
+          .then(response => response.blob())
+          .then(blob => {
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${this.theme}剧本封面.jpg`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          })
+          .catch(error => {
+            console.error('图片下载失败:', error);
+            alert('封面下载失败，请重试');
+          });
       }
     },
     share() {
@@ -131,6 +137,7 @@ export default {
 </script>
 
 <style scoped>
+/* 保持之前的样式不变 */
 .container {
   max-width: 800px;
   margin: 0 auto;
@@ -163,7 +170,7 @@ input, textarea {
   border: 1px solid #ddd;
   border-radius: 6px;
   font-size: 16px;
-  transition: border-color 0.3s;
+  transition: border-color 0.3;
 }
 
 input:focus, textarea:focus {
@@ -186,7 +193,7 @@ button {
   cursor: pointer;
   font-size: 17px;
   font-weight: 600;
-  transition: all 0.3s;
+  transition: all 0.3;
   display: block;
   width: 100%;
   margin-top: 10px;
